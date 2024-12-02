@@ -90,15 +90,17 @@ def main(args: List[str]) -> None:
         fqdn, ips = query_subdomain(domain, subdomain)
         if ips:
             results.append((fqdn, ips))
-        #     # print the results
-        #     print(f"{fqdn} => {''.join(str(ips))}")
-        # # else:
-        #     # print(f"No DNS records found for {fqdn}")
 
     # Print the results
-    print("\nMapping Results:")
+    print("\nMapping Results:\n")
     for fqdn, ips in results:
-        print(f"{fqdn} => {''.join(str(ips))}")
+        print(f"Subdomain: {fqdn}")
+        print(f"  IPs/References:")
+        for ip in ips:
+            # Decode byte strings if necessary
+            ip = ip.decode() if isinstance(ip, bytes) else ip
+            print(f"    - {ip}")
+        print()  # Add a blank line for better readability
 
 
 if __name__ == "__main__":
