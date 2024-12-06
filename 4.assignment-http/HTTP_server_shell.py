@@ -12,6 +12,9 @@ CSS_DIR = os.path.join(WEBROOT_DIR, "css")
 IMG_DIR = os.path.join(WEBROOT_DIR, "imgs")
 UPLOAD_DIR = os.path.join(WEBROOT_DIR, "uploads")
 
+# MARK: MOVED_RESOURCES dictionary for the grader to test
+MOVED_RESOURCES = {"/old.html": "/new.html"}
+
 DEFAULT_RESOURCES = {"": "index.html", "/": "index.html"}
 MIME_TYPES = {
     ".html": "text/html",
@@ -52,10 +55,11 @@ def get_file_data(filename: str) -> bytes | None:
         # print(f"File not found: {filename}")
         return None
 
+
 def handle_client_request_calculate_area(resource: str, socket) -> None:
     # extract the height and width from the resource string
     # calculate the area and send it back to the client
-    
+
     width, height = 0, 0
 
     try:
@@ -70,7 +74,7 @@ def handle_client_request_calculate_area(resource: str, socket) -> None:
         else:
             height = int(resource.split("height=")[1].split("&")[0])
             width = int(resource.split("width=")[1])
-        
+
         area = width * height
 
         print(f"Calculating area for width={width} and height={height}")
@@ -81,6 +85,7 @@ def handle_client_request_calculate_area(resource: str, socket) -> None:
         response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".encode()
         socket.send(response)
         return
+
 
 def handle_client_request_calculate_next(resource: str, socket) -> None:
     # extract the number from the resource string
@@ -101,6 +106,7 @@ def handle_client_request_calculate_next(resource: str, socket) -> None:
         socket.send(response)
         return
 
+
 def handle_client_request(resource: str, socket) -> None:
     print(f"Handling request for resource: {resource}")
 
@@ -118,10 +124,18 @@ def handle_client_request(resource: str, socket) -> None:
     if resource in DEFAULT_RESOURCES:
         resource = DEFAULT_RESOURCES[resource]
 
-    # # check for potential issue
+    # # check for potential issue with people trying to access files outside the webroot
+    # for cybersecurity reasons, we should prevent users from accessing files outside the webroot
     file_path = os.path.normpath(os.path.join(WEBROOT_DIR, resource.lstrip("/")))
     if not file_path.startswith(WEBROOT_DIR):  # Prevent accessing files outside webroot
         response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n".encode()
+        socket.send(response)
+        return
+
+    # check if the resource is in the MOVED_RESOURCES dictionary
+    if resource in MOVED_RESOURCES:
+        print(f"Resource moved from {resource} to {MOVED_RESOURCES[resource]}")
+        response = f"HTTP/1.1 302 Moved Permanently\r\nLocation: {MOVED_RESOURCES[resource]}\r\nContent-Length: 0\r\n\r\n".encode()
         socket.send(response)
         return
 
@@ -198,13 +212,15 @@ def main():
     server_socket.listen()
     print("Listening for connections on port {}".format(PORT))
 
-    try: 
+    try:
         while True:
             client_socket, client_address = server_socket.accept()
             print(f"New connection received from {client_address}")
             client_socket.settimeout(SOCKET_TIMEOUT)
             handle_client(client_socket)
-    except KeyboardInterrupt: # gracefully shutdown the server when a keyboard interrupt is received
+    except (
+        KeyboardInterrupt
+    ):  # gracefully shutdown the server when a keyboard interrupt is received
         print("Shutting down server")
     finally:
         server_socket.close()
