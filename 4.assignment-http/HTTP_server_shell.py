@@ -49,25 +49,81 @@ def get_file_data(filename: str) -> bytes | None:
             print(f"Reading file: {filename}")
             return file.read()
     except FileNotFoundError:
+        # print(f"File not found: {filename}")
         return None
 
+def handle_client_request_calculate_area(resource: str, socket) -> None:
+    # extract the height and width from the resource string
+    # calculate the area and send it back to the client
+    
+    width, height = 0, 0
+
+    try:
+        split_resource = resource.split("?")
+
+        print(f"Split resource: {split_resource}")
+        # extract the width and height from the resource string
+        # take into account the parameters might be in different order
+        if split_resource[1].startswith("width"):
+            width = int(resource.split("width=")[1].split("&")[0])
+            height = int(resource.split("height=")[1])
+        else:
+            height = int(resource.split("height=")[1].split("&")[0])
+            width = int(resource.split("width=")[1])
+        
+        area = width * height
+
+        print(f"Calculating area for width={width} and height={height}")
+
+        response = f"HTTP/1.1 200 OK\r\nContent-Length: {len(str(area))}\r\nContent-Type: text/plain\r\n\r\n{area}".encode()
+        socket.send(response)
+    except ValueError:
+        response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".encode()
+        socket.send(response)
+        return
+
+def handle_client_request_calculate_next(resource: str, socket) -> None:
+    # extract the number from the resource string
+    # calculate the next number and send it back to the client
+
+    num = 0
+
+    try:
+        num = int(resource.split("num=")[1])
+        next_num = num + 1
+
+        print(f"Calculating next number for num={num}")
+
+        response = f"HTTP/1.1 200 OK\r\nContent-Length: {len(str(next_num))}\r\nContent-Type: text/plain\r\n\r\n{next_num}".encode()
+        socket.send(response)
+    except ValueError:
+        response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".encode()
+        socket.send(response)
+        return
 
 def handle_client_request(resource: str, socket) -> None:
     print(f"Handling request for resource: {resource}")
 
+    # check if resources is '/calculate-area?height=<>&width=<>'
+    # or '/calculate-next?num=1<>' and handle them in a special function
+
+    if resource.startswith("/calculate-area"):
+        handle_client_request_calculate_area(resource, socket)
+        return
+    elif resource.startswith("/calculate-next"):
+        handle_client_request_calculate_next(resource, socket)
+        return
+
+    # check if resource is in the DEFAULT_RESOURCES dictionary
     if resource in DEFAULT_RESOURCES:
         resource = DEFAULT_RESOURCES[resource]
 
-    file_path = os.path.join(WEBROOT_DIR, resource)
-
-    print(f"Requested file path: {file_path}")
-
     # # check for potential issue
-    # file_path = os.path.normpath(os.path.join(WEBROOT_DIR, file_name.lstrip("/")))
-    # if not file_path.startswith(WEBROOT_DIR):  # Prevent accessing files outside webroot
-    #     response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n".encode()
-    #     socket.send(response)
-    #     return
+    file_path = os.path.normpath(os.path.join(WEBROOT_DIR, resource.lstrip("/")))
+    if not file_path.startswith(WEBROOT_DIR):  # Prevent accessing files outside webroot
+        response = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n".encode()
+        socket.send(response)
+        return
 
     file_data = get_file_data(file_path)
 
@@ -82,6 +138,7 @@ def handle_client_request(resource: str, socket) -> None:
         )
 
     else:
+        print(f"Resource not found: {resource}")
         response = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".encode()
 
     socket.send(response)
