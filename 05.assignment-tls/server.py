@@ -23,41 +23,71 @@ def main():
 
     # Diffie Hellman
     # 1 - choose private key
+    private_key = protocol.diffie_hellman_choose_private_key()
     # 2 - calc public key
+    public_key = protocol.diffie_hellman_calc_public_key(private_key)
     # 3 - interact with client and calc shared secret
+    client_public_key = int.from_bytes(client_socket.recv(2), "big")
+    client_socket.send(public_key.to_bytes(2, "big"))
+    shared_secret = protocol.diffie_hellman_calc_shared_secret(
+        client_public_key, private_key
+    )
 
     # RSA
     # Pick public key
+    RSA_public_key = 65537  # Commonly used public key
     # Calculate matching private key
+    p, q = 31337, 31357  # Example prime numbers, replace with secure primes
+    RSA_private_key = protocol.get_RSA_private_key(p, q, RSA_public_key)
+    if RSA_private_key is None:
+        print("Failed to generate RSA private key")
+        return
     # Exchange RSA public keys with client
+    client_RSA_public_key = int.from_bytes(client_socket.recv(4), "big")
+    client_socket.send(RSA_public_key.to_bytes(4, "big"))
 
     while True:
         # Receive client's message
-        valid_msg, message = protocol.get_msg(client_socket)
-        if not valid_msg:
-            print("Something went wrong with the length field")
-
-        # Check if client's message is authentic
-        # 1 - separate the message and the MAC
-        # 2 - decrypt the message
-        # 3 - calc hash of message
-        # 4 - use client's public RSA key to decrypt the MAC and get the hash
-        # 5 - check if both calculations end up with the same result
-
-        if message == "EXIT":
+        is_valid, message = protocol.get_msg(client_socket)
+        if not message:
+            print("Client disconnected")
             break
 
-        # Create response. The response would be the echo of the client's message
+        # Separate the message and the MAC
+        encrypted_message, received_signature = message[:-4], int(message[-4:])
+        # Decrypt the message
+        decrypted_message = protocol.symmetric_encryption(
+            encrypted_message.encode(), shared_secret
+        )
+        # Calculate hash of the message
+        client_message_hash = protocol.calc_hash(decrypted_message)
+        # Use client's public RSA key to decrypt the MAC and get the hash
+        decrypted_signature = pow(
+            received_signature,
+            client_RSA_public_key,
+            protocol.DIFFIE_HELLMAN_P * protocol.DIFFIE_HELLMAN_G,
+        )
+        # Check if both calculations end up with the same result
+        if client_message_hash == decrypted_signature:
+            print("Client's message is authentic:", decrypted_message.decode())
+            response = create_server_rsp(decrypted_message.decode())
+        else:
+            print("Client's message is not authentic")
+            response = "Message authentication failed"
 
-        # Encrypt
-        # apply symmetric encryption to the server's message
-
-        # Send to client
-        # Combine encrypted user's message to MAC, send to client
-        msg = protocol.create_msg(message)
+        # Encrypt the response
+        encrypted_response = protocol.symmetric_encryption(
+            response.encode(), shared_secret
+        )
+        # Calculate hash of the response
+        response_hash = protocol.calc_hash(response.encode())
+        # Calculate the signature
+        signature = protocol.calc_signature(response_hash, RSA_private_key)
+        # Send the response to the client
+        msg = protocol.create_msg(encrypted_response.decode() + str(signature))
         client_socket.send(msg.encode())
 
-    print("Closing\n")
+    print("Closing connection")
     client_socket.close()
     server_socket.close()
 
