@@ -1,53 +1,88 @@
+"""Encrypted socket client implementation
+   Author:
+   Date:
+"""
+
 import socket
 import protocol
+
+CLIENT_RSA_P = 7681
+CLIENT_RSA_Q = 1913
+SERVER_RSA_P = 2833  # Add this line
+SERVER_RSA_Q = 2039  # Add this line
 
 
 def main():
     my_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     my_socket.connect(("127.0.0.1", protocol.PORT))
 
+    print("Connected to server")
+
+    # print("Starting Diffie Hellman Key Exchange")
     # Diffie Hellman
-    # 1 - choose private key
-    private_key = protocol.diffie_hellman_choose_private_key()
-    # 2 - calc public key
-    public_key = protocol.diffie_hellman_calc_public_key(private_key)
-    # 3 - interact with server and calc shared secret
-    my_socket.send(public_key.to_bytes(2, "big"))
-    other_side_public = int.from_bytes(my_socket.recv(2), "big")
+    diffie_private_key = protocol.diffie_hellman_choose_private_key()
+    diffie_public_key = protocol.diffie_hellman_calc_public_key(diffie_private_key)
+
+    # Send public key to server
+    my_socket.send(str(diffie_public_key).encode())
+    # print(f"Client Public Key: {diffie_public_key}")
+
+    # Wait for the server's public key
+    server_public_key = int(my_socket.recv(1024).decode())
+    # print(f"Server Public Key: {server_public_key}")
+
+    # Calculate shared secret
     shared_secret = protocol.diffie_hellman_calc_shared_secret(
-        other_side_public, private_key
+        server_public_key, diffie_private_key
     )
 
+    # print(f"Diffie Hellman Public Key: {diffie_public_key}")
+    # print(f"Diffie Hellman Private Key: {diffie_private_key}")
+    # print(f"Shared Secret: {shared_secret}")
+
+    # print("Starting RSA Key Exchange")
+
     # RSA
-    # Pick public key
-    RSA_public_key = 65537  # Commonly used public key
-    # Calculate matching private key
-    p, q = 31337, 31357  # Example prime numbers, replace with secure primes
-    RSA_private_key = protocol.get_RSA_private_key(p, q, RSA_public_key)
-    if RSA_private_key is None:
-        print("Failed to generate RSA private key")
-        return
+    rsa_public_key = 65537
+    rsa_private_key = protocol.get_RSA_private_key(
+        CLIENT_RSA_P, CLIENT_RSA_Q, rsa_public_key
+    )
+
     # Exchange RSA public keys with server
-    my_socket.send(RSA_public_key.to_bytes(4, "big"))
-    server_RSA_public_key = int.from_bytes(my_socket.recv(4), "big")
+    my_socket.send(str(rsa_public_key).encode())
+    server_rsa_public_key = int(my_socket.recv(1024).decode())
+
+    # print(f"RSA Public Key: {rsa_public_key}")
+    # print(f"RSA Private Key: {rsa_private_key}")
+    # print(f"Server RSA Public Key: {server_rsa_public_key}")
 
     while True:
-        user_input = input("Enter command\n")
-        # Add MAC (signature)
-        # 1 - calc hash of user input
-        user_input_hash = protocol.calc_hash(user_input.encode())
-        # 2 - calc the signature
-        signature = protocol.calc_signature(user_input_hash, RSA_private_key)
+        user_input = input("Enter command: ")
+        # print(f"User: {user_input}")
 
-        # Encrypt
-        # apply symmetric encryption to the user's input
-        encrypted_message = protocol.symmetric_encryption(
-            user_input.encode(), shared_secret
+        # Calculate hash of user input
+        user_input_hash = protocol.calc_hash(user_input)
+        # print(f"User Hash: {user_input_hash}")
+
+        # Calculate the signature
+        signature = protocol.calc_signature(
+            user_input_hash, rsa_private_key, CLIENT_RSA_P, CLIENT_RSA_Q
         )
+        # print(f"Signature: {signature}")
+
+        # Encrypt the user's input
+        encrypted_message = protocol.symmetric_encryption(user_input, shared_secret)
+        # print(f"Encrypted Message: {encrypted_message}")
+
+        # Combine encrypted message and signature
+        combined_message = encrypted_message + signature.to_bytes(
+            protocol.MAC_LENGTH, "big"
+        )
+        # print(f"Combined Message: {combined_message}")
+        # print(f"Combined Message (hex): {combined_message.hex()}")
 
         # Send to server
-        # Combine encrypted user's message to MAC, send to server
-        msg = protocol.create_msg(encrypted_message + str(signature).encode())
+        msg = protocol.create_msg(combined_message)
         my_socket.send(msg)
 
         if user_input == "EXIT":
@@ -57,29 +92,47 @@ def main():
         valid_msg, message = protocol.get_msg(my_socket)
         if not valid_msg:
             print("Something went wrong with the length field")
+            break
 
         # Check if server's message is authentic
-        # 1 - separate the message and the MAC
-        # decode the message and the MAC
-        message = message.decode()
-        encrypted_message, received_signature = message[:-4], int(message[-4:])
-        # 2 - decrypt the message
-        decrypted_message = protocol.symmetric_encryption(
-            encrypted_message.encode(), shared_secret
+        encrypted_message, received_signature = (
+            message[: -protocol.MAC_LENGTH],
+            message[-protocol.MAC_LENGTH :],
         )
-        # 3 - calc hash of message
-        server_message_hash = protocol.calc_hash(decrypted_message)
-        # 4 - use server's public RSA key to decrypt the MAC and get the hash
+
+        # Decrypt the message
+        decrypted_message = protocol.symmetric_decryption(
+            encrypted_message, shared_secret
+        )
+
+        # Calculate hash of received message
+        received_hash = protocol.calc_hash(decrypted_message)
+
+        # Convert received signature to int
+        received_signature = int.from_bytes(received_signature, "big")
+        # print(f"Received signature (int): {received_signature}")
+
+        # Verify the signature
         decrypted_signature = pow(
-            received_signature,
-            server_RSA_public_key,
-            protocol.DIFFIE_HELLMAN_P * protocol.DIFFIE_HELLMAN_G,
+            received_signature, server_rsa_public_key, SERVER_RSA_P * SERVER_RSA_Q
         )
-        # 5 - check if both calculations end up with the same result
-        if server_message_hash == decrypted_signature:
-            print("Server's message is authentic:", decrypted_message.decode())
+        # print(f"Decrypted signature: {decrypted_signature}")
+        # print(f"Calculated hash: {received_hash}")
+        # print(f"RSA modulus: {SERVER_RSA_P * SERVER_RSA_Q}")
+        # print(f"Server's public key: {server_rsa_public_key}")
+
+        if received_hash == decrypted_signature:
+            # print("Server's message is authentic")
+            # print the message
+            print(f"Server: {decrypted_message}")
         else:
-            print("Server's message is not authentic")
+            print(
+                f"Server's message is not authentic. Expected {received_hash}, got {decrypted_signature}"
+            )
+            break
+
+        # Print server's message
+        # print(f"Server: {decrypted_message}")
 
     print("Closing\n")
     my_socket.close()
