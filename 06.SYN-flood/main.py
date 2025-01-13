@@ -65,22 +65,16 @@ def analyze_syn_flood(
     return suspicious_ips
 
 
-def compare_results(detected_ips, attackers_file):
+def write_attackers_to_file(detected_ips, output_file):
     """
-    Compare detected suspicious IPs against the given list of attackers.
+    Write detected suspicious IPs to a file.
 
     :param detected_ips: Dictionary of detected IPs and their SYN packet counts
-    :param attackers_file: Path to the file with the actual attackers
+    :param output_file: Path to the output file
     """
-    with open(attackers_file, "r") as f:
-        attacker_ips = {line.strip() for line in f if line.strip()}
-
-    detected_set = set(detected_ips.keys())
-    correctly_detected = detected_set.intersection(attacker_ips)
-    missed_attackers = attacker_ips.difference(detected_set)
-    false_positives = detected_set.difference(attacker_ips)
-
-    return len(false_positives), len(missed_attackers), len(correctly_detected)
+    with open(output_file, "w") as f:
+        for ip in detected_ips.keys():
+            f.write(f"{ip}\n")
 
 
 # Example Usage
@@ -92,9 +86,4 @@ detected_ips = analyze_syn_flood(
     ratio_threshold=1.5,
     internal_ip_ranges=["100.64."],
 )
-false_positives, missed_attackers, correctly_detected = compare_results(
-    detected_ips, "attackersListFiltered.txt"
-)
-
-print(f"False Positives: {false_positives}, Missed Attackers: {missed_attackers}")
-print(f"Correctly Detected Attackers: {correctly_detected}")
+write_attackers_to_file(detected_ips, "attackers_ip.txt")
