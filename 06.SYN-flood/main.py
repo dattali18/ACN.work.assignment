@@ -2,17 +2,12 @@ from scapy.all import rdpcap, TCP
 from collections import Counter, defaultdict
 
 
-def analyze_syn_flood(
-    pcap_file, syn_threshold=20, ratio_threshold=3, internal_ip_ranges=None
-):
+def read_pcap(pcap_file):
     """
-    Analyze a pcapng file for SYN flood attack patterns.
+    Read a pcapng file and extract SYN and SYN-ACK packet counts.
 
     :param pcap_file: Path to the pcapng file
-    :param syn_threshold: Minimum SYN packets to flag an IP as suspicious
-    :param ratio_threshold: Minimum ratio of SYN to SYN-ACK packets to flag an IP as suspicious
-    :param internal_ip_ranges: List of internal/private IP ranges to whitelist (optional)
-    :return: Detected SYN packet counts and flagged IPs
+    :return: SYN packet counts, SYN-ACK packet counts
     """
     packets = rdpcap(pcap_file)
     syn_counter = Counter()
@@ -31,6 +26,26 @@ def analyze_syn_flood(
             elif tcp_layer.flags == 0x12:  # SYN-ACK flag
                 syn_ack_counter[dst_ip] += 1
 
+    return syn_counter, syn_ack_counter
+
+
+def analyze_syn_flood(
+    syn_counter,
+    syn_ack_counter,
+    syn_threshold=10,
+    ratio_threshold=2,
+    internal_ip_ranges=None,
+):
+    """
+    Analyze SYN and SYN-ACK packet counts for SYN flood attack patterns.
+
+    :param syn_counter: SYN packet counts
+    :param syn_ack_counter: SYN-ACK packet counts
+    :param syn_threshold: Minimum SYN packets to flag an IP as suspicious
+    :param ratio_threshold: Minimum ratio of SYN to SYN-ACK packets to flag an IP as suspicious
+    :param internal_ip_ranges: List of internal/private IP ranges to whitelist (optional)
+    :return: Detected SYN packet counts and flagged IPs
+    """
     # Filter suspicious IPs based on SYN packets and SYN/SYN-ACK ratio
     suspicious_ips = {
         ip: count
@@ -47,17 +62,7 @@ def analyze_syn_flood(
             if not any(ip.startswith(prefix) for prefix in internal_ip_ranges)
         }
 
-    # Output results
-    print("=== SYN Flood Analysis Results ===")
-    print(f"Total SYN packets analyzed: {sum(syn_counter.values())}")
-    print(f"Total unique IPs: {len(syn_counter)}")
-    print(f"Suspicious IPs: {len(suspicious_ips)}\n")
-
-    print("Suspicious IPs and SYN packet counts:")
-    for ip, count in suspicious_ips.items():
-        print(f"{ip}: {count} SYN packets")
-
-    return syn_counter, suspicious_ips
+    return suspicious_ips
 
 
 def compare_results(detected_ips, attackers_file):
@@ -75,30 +80,60 @@ def compare_results(detected_ips, attackers_file):
     missed_attackers = attacker_ips.difference(detected_set)
     false_positives = detected_set.difference(attacker_ips)
 
-    print("\n=== Comparison Results ===")
-    print(f"Total attackers given: {len(attacker_ips)}")
-    print(f"Total detected IPs: {len(detected_set)}")
-    print(f"Correctly detected attackers: {len(correctly_detected)}")
-    print(f"Missed attackers: {len(missed_attackers)}")
-    print(f"False positives: {len(false_positives)}\n")
+    return len(false_positives), len(missed_attackers), len(correctly_detected)
 
-    print("Missed Attackers:")
-    for ip in missed_attackers:
-        print(ip)
 
-    print("\nFalse Positives:")
-    for ip in false_positives:
-        print(ip)
+def find_best_parameters(pcap_file, attackers_file, internal_ip_ranges=None):
+    best_params = None
+    best_result = {"false_positives": float("inf"), "missed_attackers": float("inf")}
+
+    syn_counter, syn_ack_counter = read_pcap(pcap_file)
+
+    for syn_threshold in range(5, 21, 5):
+        for ratio_threshold in [1.5, 2, 2.5, 3]:
+            detected_ips = analyze_syn_flood(
+                syn_counter,
+                syn_ack_counter,
+                syn_threshold=syn_threshold,
+                ratio_threshold=ratio_threshold,
+                internal_ip_ranges=internal_ip_ranges,
+            )
+
+            false_positives, missed_attackers, correctly_detected = compare_results(
+                detected_ips, attackers_file
+            )
+
+            result = {
+                "syn_threshold": syn_threshold,
+                "ratio_threshold": ratio_threshold,
+                "false_positives": false_positives,
+                "missed_attackers": missed_attackers,
+                "correctly_detected": correctly_detected,
+            }
+
+            print(
+                f"Parameters: SYN Threshold={syn_threshold}, Ratio Threshold={ratio_threshold}"
+            )
+            print(
+                f"False Positives: {result['false_positives']}, Missed Attackers: {result['missed_attackers']}\n"
+            )
+
+            if result["false_positives"] < best_result["false_positives"] or (
+                result["false_positives"] == best_result["false_positives"]
+                and result["missed_attackers"] < best_result["missed_attackers"]
+            ):
+                best_result = result
+                best_params = (syn_threshold, ratio_threshold)
+
+    print(
+        f"Best Parameters: SYN Threshold={best_params[0]}, Ratio Threshold={best_params[1]}"
+    )
+    print(
+        f"False Positives: {best_result['false_positives']}, Missed Attackers: {best_result['missed_attackers']}\n"
+    )
 
 
 # Example Usage
-# Step 1: Analyze the pcap file for SYN flood patterns
-syn_counts, detected_ips = analyze_syn_flood(
-    "SYNflood.pcapng",
-    syn_threshold=20,
-    ratio_threshold=3,
-    internal_ip_ranges=["100.64."],
+find_best_parameters(
+    "SYNflood.pcapng", "attackersListFiltered.txt", internal_ip_ranges=["100.64."]
 )
-
-# Step 2: Compare results with the provided attackers list
-compare_results(detected_ips, "attackersListFiltered.txt")
