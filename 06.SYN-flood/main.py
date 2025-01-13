@@ -2,17 +2,21 @@ from scapy.all import rdpcap, TCP
 from collections import Counter, defaultdict
 
 
-def analyze_syn_flood(pcap_file, internal_ip_ranges=None):
+def analyze_syn_flood(
+    pcap_file, syn_threshold=20, ratio_threshold=3, internal_ip_ranges=None
+):
     """
     Analyze a pcapng file for SYN flood attack patterns.
 
     :param pcap_file: Path to the pcapng file
+    :param syn_threshold: Minimum SYN packets to flag an IP as suspicious
+    :param ratio_threshold: Minimum ratio of SYN to SYN-ACK packets to flag an IP as suspicious
     :param internal_ip_ranges: List of internal/private IP ranges to whitelist (optional)
     :return: Detected SYN packet counts and flagged IPs
     """
     packets = rdpcap(pcap_file)
     syn_counter = Counter()
-    syn_ack_counter = defaultdict(set)
+    syn_ack_counter = Counter()
 
     # Parse packets
     for pkt in packets:
@@ -25,11 +29,14 @@ def analyze_syn_flood(pcap_file, internal_ip_ranges=None):
             if tcp_layer.flags == 0x02:  # SYN flag
                 syn_counter[src_ip] += 1
             elif tcp_layer.flags == 0x12:  # SYN-ACK flag
-                syn_ack_counter[dst_ip].add(src_ip)
+                syn_ack_counter[dst_ip] += 1
 
-    # Filter suspicious IPs based on SYN packets without SYN-ACK responses
+    # Filter suspicious IPs based on SYN packets and SYN/SYN-ACK ratio
     suspicious_ips = {
-        ip: count for ip, count in syn_counter.items() if ip not in syn_ack_counter
+        ip: count
+        for ip, count in syn_counter.items()
+        if count > syn_threshold
+        and (count / (syn_ack_counter[ip] + 1)) > ratio_threshold
     }
 
     # Optionally remove internal/private IPs
@@ -87,7 +94,10 @@ def compare_results(detected_ips, attackers_file):
 # Example Usage
 # Step 1: Analyze the pcap file for SYN flood patterns
 syn_counts, detected_ips = analyze_syn_flood(
-    "SYNflood.pcapng", internal_ip_ranges=["100.64."]
+    "SYNflood.pcapng",
+    syn_threshold=20,
+    ratio_threshold=3,
+    internal_ip_ranges=["100.64."],
 )
 
 # Step 2: Compare results with the provided attackers list
