@@ -32,8 +32,8 @@ def read_pcap(pcap_file):
 def analyze_syn_flood(
     syn_counter,
     syn_ack_counter,
-    syn_threshold=10,
-    ratio_threshold=2,
+    syn_threshold=9,
+    ratio_threshold=1.5,
     internal_ip_ranges=None,
 ):
     """
@@ -83,57 +83,18 @@ def compare_results(detected_ips, attackers_file):
     return len(false_positives), len(missed_attackers), len(correctly_detected)
 
 
-def find_best_parameters(pcap_file, attackers_file, internal_ip_ranges=None):
-    best_params = None
-    best_result = {"false_positives": float("inf"), "missed_attackers": float("inf")}
-
-    syn_counter, syn_ack_counter = read_pcap(pcap_file)
-
-    for syn_threshold in range(5, 21, 1):
-        for ratio_threshold in [1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.1, 2.2, 2.3, 2.4, 2.5]:
-            detected_ips = analyze_syn_flood(
-                syn_counter,
-                syn_ack_counter,
-                syn_threshold=syn_threshold,
-                ratio_threshold=ratio_threshold,
-                internal_ip_ranges=internal_ip_ranges,
-            )
-
-            false_positives, missed_attackers, correctly_detected = compare_results(
-                detected_ips, attackers_file
-            )
-
-            result = {
-                "syn_threshold": syn_threshold,
-                "ratio_threshold": ratio_threshold,
-                "false_positives": false_positives,
-                "missed_attackers": missed_attackers,
-                "correctly_detected": correctly_detected,
-            }
-
-            print(
-                f"Parameters: SYN Threshold={syn_threshold}, Ratio Threshold={ratio_threshold}"
-            )
-            print(
-                f"False Positives: {result['false_positives']}, Missed Attackers: {result['missed_attackers']}\n"
-            )
-
-            if result["false_positives"] < best_result["false_positives"] or (
-                result["false_positives"] == best_result["false_positives"]
-                and result["missed_attackers"] < best_result["missed_attackers"]
-            ):
-                best_result = result
-                best_params = (syn_threshold, ratio_threshold)
-
-    print(
-        f"Best Parameters: SYN Threshold={best_params[0]}, Ratio Threshold={best_params[1]}"
-    )
-    print(
-        f"False Positives: {best_result['false_positives']}, Missed Attackers: {best_result['missed_attackers']}\n"
-    )
-
-
 # Example Usage
-find_best_parameters(
-    "SYNflood.pcapng", "attackersListFiltered.txt", internal_ip_ranges=["100.64."]
+syn_counter, syn_ack_counter = read_pcap("SYNflood.pcapng")
+detected_ips = analyze_syn_flood(
+    syn_counter,
+    syn_ack_counter,
+    syn_threshold=9,
+    ratio_threshold=1.5,
+    internal_ip_ranges=["100.64."],
 )
+false_positives, missed_attackers, correctly_detected = compare_results(
+    detected_ips, "attackersListFiltered.txt"
+)
+
+print(f"False Positives: {false_positives}, Missed Attackers: {missed_attackers}")
+print(f"Correctly Detected Attackers: {correctly_detected}")
