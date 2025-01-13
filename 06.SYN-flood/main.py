@@ -89,8 +89,8 @@ def find_best_parameters(pcap_file, attackers_file, internal_ip_ranges=None):
 
     syn_counter, syn_ack_counter = read_pcap(pcap_file)
 
-    for syn_threshold in range(5, 21, 5):
-        for ratio_threshold in [1.5, 2, 2.5, 3]:
+    for syn_threshold in range(5, 21, 1):
+        for ratio_threshold in [1.5, 1.6, 1.7, 1.8, 1.9, 2, 2.1, 2.2, 2.3, 2.4, 2.5]:
             detected_ips = analyze_syn_flood(
                 syn_counter,
                 syn_ack_counter,
